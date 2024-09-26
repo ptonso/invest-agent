@@ -4,9 +4,6 @@ import pandas as pd
 from bcb import sgs
 from datetime import datetime
 
-warnings.filterwarnings("ignore", category=FutureWarning, message="The 'unit' keyword in TimedeltaIndex construction is deprecated and will be removed in a future version.")
-warnings.filterwarnings("ignore", category=UserWarning, message="No timezone found, symbol may be delisted")
-
 
 brazilian_stocks = [
     "ABEV3.SA",  # Ambev
@@ -87,16 +84,23 @@ def save_stock_csv(csv_path, tickers, start_date=None):
     """
     Downloads stock price and dividend data for the specified tickers and saves it to a CSV file.
     """
+
+    if start_date:
+        start_date = pd.to_datetime(start_date).tz_localize(None)
+
     combined_data = None
 
     for ticker in tickers:
         stock = yf.Ticker(ticker)
+        dividends_data = stock.dividends
+
+        # Ensure dividends_data.index is timezone-naive
+        dividends_data.index = pd.to_datetime(dividends_data.index).tz_localize(None)
         if start_date:
-            price_data = stock.history(start=start_date)['Close']
-            dividends_data = stock.dividends[stock.dividends.index >= start_date]
+            price_data = stock.history(start=start_date)['Close'].tz_localize(None)
+            dividends_data = dividends_data[dividends_data.index >= start_date]
         else:
-            price_data = stock.history(period='max')['Close']
-            dividends_data = stock.dividends
+            price_data = stock.history(period='max')['Close'].tz_localize(None)
 
         if price_data.empty or dividends_data.empty:
             print(f"{ticker}: No data found, symbol may be delisted or inactive.")
@@ -118,14 +122,6 @@ def save_stock_csv(csv_path, tickers, start_date=None):
     else:
         raise ValueError("No valid data was fetched for any tickers. CSV file was not updated.")
 
-
-series_codes = [
-    # Índices de Preços
-    ("selic", 432),
-    ("ipca", 433),
-    ("ipca_15", 7478),
-    ("ipca_12m", 13522)
-]
 
 
 def save_indexes_csv(csv_path, series_codes, start_date=None, last_date=None):
@@ -172,11 +168,18 @@ def save_indexes_csv(csv_path, series_codes, start_date=None, last_date=None):
 
 if __name__ == "__main__":
 
-    parent = "data"
+    parent = "data/raw"
     stock_csv = f"{parent}/stocks.csv"
     index_csv = f"{parent}/indexes.csv"
 
-    start_date = None
+    start_date = "2000-01-03"
+
+    series_codes = [
+        # Índices de Preços
+        # ("selic", 432),
+        ("selic", 11),
+        ("ipca", 433),
+    ]
 
     print("downloading data...")
 
