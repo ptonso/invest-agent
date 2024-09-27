@@ -116,8 +116,9 @@ def save_stock_csv(csv_path, tickers, start_date=None):
             combined_data = combined_data.merge(history_data.reset_index(), on='Date', how='outer')
             combined_data = combined_data.merge(dividends_df, on='Date', how='outer')
 
+    combined_data.set_index("Date", inplace=True)
     if combined_data is not None and not combined_data.empty:
-        combined_data.to_csv(csv_path, index=False)
+        combined_data.to_csv(csv_path, index=True)
         print(f'Saved: {csv_path}')
     else:
         raise ValueError("No valid data was fetched for any tickers. CSV file was not updated.")
