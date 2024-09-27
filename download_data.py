@@ -92,28 +92,28 @@ def save_stock_csv(csv_path, tickers, start_date=None):
 
     for ticker in tickers:
         stock = yf.Ticker(ticker)
+        history_data = stock.history(start=start_date) if start_date else stock.history(period='max')
         dividends_data = stock.dividends
 
-        # Ensure dividends_data.index is timezone-naive
+        history_data.index = pd.to_datetime(history_data.index).tz_localize(None)
         dividends_data.index = pd.to_datetime(dividends_data.index).tz_localize(None)
-        if start_date:
-            price_data = stock.history(start=start_date)['Close'].tz_localize(None)
-            dividends_data = dividends_data[dividends_data.index >= start_date]
-        else:
-            price_data = stock.history(period='max')['Close'].tz_localize(None)
 
-        if price_data.empty or dividends_data.empty:
+        if start_date:
+            history_data = history_data[history_data.index >= start_date]
+            dividends_data = dividends_data[dividends_data.index >= start_date]
+
+        if history_data.empty and dividends_data.empty:
             print(f"{ticker}: No data found, symbol may be delisted or inactive.")
             continue
 
-        price_df = price_data.reset_index().rename(columns={'Date': 'Date', 'Close': ticker})
-        dividends_df = dividends_data.reset_index().rename(columns={'Date': 'Date', 'Dividends': ticker + '_dividends'})
+        history_data = history_data.rename(columns={col: f"{ticker}_{col.lower()}" for col in history_data.columns})
+        dividends_df = dividends_data.reset_index().rename(columns={'Date': 'Date', 'Dividends': f"{ticker}_dividends"})
 
         if combined_data is None:
-            combined_data = price_df
+            combined_data = history_data.reset_index()
             combined_data = combined_data.merge(dividends_df, on='Date', how='outer')
         else:
-            combined_data = combined_data.merge(price_df, on='Date', how='outer')
+            combined_data = combined_data.merge(history_data.reset_index(), on='Date', how='outer')
             combined_data = combined_data.merge(dividends_df, on='Date', how='outer')
 
     if combined_data is not None and not combined_data.empty:

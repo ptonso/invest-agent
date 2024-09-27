@@ -2,60 +2,75 @@ import pandas as pd
 import numpy as np
 
 
-def process_stocks_to_total_return_variation(input_csv, output_csv):
+def clean_stock_data(input_csv, output_csv=None, max_interpolation=10):
     """
-    Processes raw stock and dividend data into total return variation for each stock.
+    Performs universal cleaning on stock data: standardizes daily entries, interpolates missing data, 
+    transforms NaN to zero, and saves the cleaned data to a CSV.
+    
+    Arguments:
+    input_csv -- Path to the raw CSV file containing stock prices and dividends
+    output_csv -- Path where the cleaned stock data CSV will be saved
+    """
+    stock_data = pd.read_csv(input_csv, parse_dates=['Date'])
+    
+    stock_data['Date'] = pd.to_datetime(stock_data['Date'])
+    stock_data.set_index('Date', inplace=True)
+    
+    full_date_range = pd.date_range(start=stock_data.index.min(), end=stock_data.index.max(), freq='D')
+    
+    stock_data = stock_data.reindex(full_date_range)
+    
+
+    stock_data = stock_data.interpolate(method='linear', limit=max_interpolation, limit_direction='forward')
+    
+    stock_data.fillna(0, inplace=True)
+
+    if output_csv:
+        stock_data.to_csv(output_csv)
+        print(f"Saved cleaned stock data to {output_csv}")
+    return stock_data
+
+
+
+
+def build_total_variation(input_csv, output_csv):
+    """
+    Builds total return variation using cleaned stock data. Only processes '_close' and '_dividends' columns.
     
     Arguments:
     input_csv -- Path to the raw CSV file containing stock prices and dividends
     output_csv -- Path where the processed total return variation CSV will be saved
     """
-
-    stock_data = pd.read_csv(input_csv, parse_dates=['Date'])
+    stocks = clean_stock_data(input_csv)
     
-    stock_data['Date'] = pd.to_datetime(stock_data['Date'], utc=True).dt.date
-
-    stock_data.set_index('Date', inplace=True)
-
-    full_date_range = pd.date_range(start=stock_data.index.min(), end=stock_data.index.max(), freq='D')
-    stock_data = stock_data.reindex(full_date_range)
-
     total_return_data = {}
+    missing_dividend_columns = {}
 
-    for column in stock_data.columns:
-        if "_dividends" not in column:
-            stock_name = column
+    for column in stocks.columns:
+        if "_close" in column:
+            stock_name = column.replace("_close", "")
             dividend_column = f"{stock_name}_dividends"
             
-            if stock_data[column].count() < 2:
-                print(f"Dropping {stock_name} due to insufficient data.")
-                continue
+            close_price = stocks[column]
+            dividends = stocks[dividend_column] if dividend_column in stocks.columns else pd.Series(0, index=stocks.index)
+            
+            # if close_price is zero, we set 0 to the total variation
+            valid_mask = close_price != 0
+            total_return_variation = pd.Series(0, index=stocks.index, dtype='float64')
 
-            stock_data[column] = stock_data[column].interpolate(method='akima')
+            total_return_variation[valid_mask] = (
+                ( (close_price.shift(-1) + dividends.shift(-1)) - close_price ) / close_price
+                )[valid_mask] # ( (P_t+1 + D_t+1) - P_t) / P_t
 
-            if dividend_column not in stock_data.columns:
-                stock_data[dividend_column] = 0
-            else:
-                stock_data[dividend_column] = stock_data[dividend_column].fillna(0)
-
-            if stock_data[column].isnull().all():
-                print(f"Skipping {stock_name} due to all null stock prices.")
-                continue
-
-            total_return_variation = (
-                ((stock_data[stock_name] + stock_data[dividend_column]).shift(-1) - stock_data[stock_name]) / stock_data[stock_name]
-                )  # TR formula: ((P_t+1 + D_t+1) - P_t) / P_t
-
-            # Fill any missing values with 0 for days where the stock didn't trade yet or data was unavailable
             total_return_variation = total_return_variation.fillna(0)
             total_return_data[stock_name] = total_return_variation
 
-    total_return_df = pd.DataFrame(total_return_data, index=stock_data.index)
+    total_return_df = pd.DataFrame(total_return_data, index=stocks.index)
+    total_return_df.index.name = 'Date'
 
     total_return_df.reset_index(inplace=True)
-    total_return_df.rename(columns={'index': 'Date'}, inplace=True)
 
-    total_return_df.to_csv(output_csv, index=False)  # Set index=False so Date becomes a column
+    total_return_df.to_csv(output_csv, index=False)
     print(f"Saved total return variation to {output_csv}")
 
 
@@ -117,11 +132,16 @@ def process_ipca_to_daily_variation(input_csv, output_csv):
 
 if __name__ == "__main__":
     stock_input_csv = 'data/raw/stocks.csv'
-    stock_output_csv = 'data/clean/total-return-variation.csv'
-    
     index_input_csv = 'data/raw/indexes.csv'
+
+    var_output_csv = 'data/clean/total-return-var.csv'
+    stocks_output_csv = 'data/clean/stocks.csv'
     ipca_output_csv = 'data/clean/ipca.csv'
 
-    process_stocks_to_total_return_variation(stock_input_csv, stock_output_csv)
+
+    clean_stock_data(stock_input_csv, stocks_output_csv)
+    build_total_variation(stock_input_csv, var_output_csv)
+
+
     process_ipca_to_daily_variation(index_input_csv, ipca_output_csv)
-    add_selic_to_total_return(stock_output_csv, index_input_csv)
+    add_selic_to_total_return(var_output_csv, index_input_csv)
