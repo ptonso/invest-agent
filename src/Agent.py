@@ -49,10 +49,9 @@ class Agent:
 
 
 class NNActor(nn.Module):
-    def __init__(self, state_size, action_size, hidden_layers=[128, 64, 32], random_state=123):
-
+    def __init__(self, state_size, action_size, hidden_layers=[128, 64, 32], random_state=123,
+                 add_noise=False, noise_scale=0.01, entropy_beta=0.01):
         torch.manual_seed(random_state)
-
         super(NNActor, self).__init__()
         layers = []
         input_size = state_size
@@ -62,11 +61,18 @@ class NNActor(nn.Module):
             input_size = hidden_size
 
         layers.append(nn.Linear(input_size, action_size))
-        layers.append(nn.Softmax(dim=-1))
         self.model = nn.Sequential(*layers)
+        self.add_noise = add_noise
+        self.noise_scale = noise_scale
+        self.entropy_beta = entropy_beta
+        self.action_size = action_size
 
     def forward(self, state):
-        return self.model(state)
+        logits = self.model(state)
+        if self.add_noise:
+            noise = torch.randn_like(logits) * self.noise_scale
+            logits += noise
+        return torch.softmax(logits, dim=-1)
 
     def predict(self, state):
         action = self.forward(state.unsqueeze(0))
@@ -75,7 +81,8 @@ class NNActor(nn.Module):
     def update(self, state, critic, optimizer):
         action = self.forward(state.unsqueeze(0))
         q_value = critic.forward(state.unsqueeze(0), action)
-        policy_loss = -q_value.mean()
+        entropy_loss = -torch.sum(action * torch.log(action + 1e-6))
+        policy_loss = -q_value.mean() - self.entropy_beta * entropy_loss
         optimizer.zero_grad()
         policy_loss.backward()
         optimizer.step()

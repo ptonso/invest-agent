@@ -44,7 +44,6 @@ def build_total_variation(input_csv, output_csv):
     stocks = clean_stock_data(input_csv)
     
     total_return_data = {}
-    missing_dividend_columns = {}
 
     for column in stocks.columns:
         if "_close" in column:
@@ -81,6 +80,8 @@ def add_selic_to_total_return(total_return_csv, selic_csv):
     
     selic_df['selic'] = selic_df['selic'].interpolate(method='linear')
     selic_df.set_index('Date', inplace=True)
+
+    selic_df['selic'] = selic_df['selic'] / 365
     
     min_date = total_return_df['Date'].min()
     max_date = total_return_df['Date'].max()
@@ -131,12 +132,12 @@ def process_ipca_to_daily_variation(input_csv, output_csv):
     print(f"Saved IPCA daily variation to {output_csv}")
 
 if __name__ == "__main__":
-    stock_input_csv = 'data/raw/stocks.csv'
-    index_input_csv = 'data/raw/indexes.csv'
+    stock_input_csv = 'data/00_raw/stocks.csv'
+    index_input_csv = 'data/00_raw/indexes.csv'
 
-    var_output_csv = 'data/clean/total-return-var.csv'
-    stocks_output_csv = 'data/clean/stocks.csv'
-    ipca_output_csv = 'data/clean/ipca.csv'
+    var_output_csv = 'data/01_clean/total_return_var.csv'
+    stocks_output_csv = 'data/01_clean/stocks.csv'
+    ipca_output_csv = 'data/01_clean/ipca.csv'
 
 
     clean_stock_data(stock_input_csv, stocks_output_csv)
