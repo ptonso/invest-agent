@@ -21,7 +21,6 @@ brazilian_stocks = [
     "BRKM5.SA",  # Braskem
     "CCRO3.SA",  # CCR
     "CIEL3.SA",  # Cielo
-    "CMIG4.SA",  # Cemig
     "CSNA3.SA",  # CSN
     "CYRE3.SA",  # Cyrela
     "ECOR3.SA",  # Ecorodovias
@@ -43,7 +42,6 @@ brazilian_stocks = [
     "ITUB4.SA",  # Itau Unibanco
     "JBSS3.SA",  # JBS
     "KLBN11.SA", # Klabin
-    "LREN3.SA",  # Lojas Renner
     "MGLU3.SA",  # Magazine Luiza
     "MRFG3.SA",  # Marfrig
     "MRVE3.SA",  # MRV Engenharia
@@ -58,9 +56,7 @@ brazilian_stocks = [
     "RENT3.SA",  # Localiza
     "SANB11.SA", # Santander Brasil
     "SBSP3.SA",  # Sabesp
-    "SUZB3.SA",  # Suzano
     "TAEE11.SA", # Taesa
-    "UGPA3.SA",  # Ultrapar
     "USIM5.SA",  # Usiminas
     "VALE3.SA",  # Vale
     "VIVT3.SA",  # Telefonica Brasil

@@ -4,25 +4,16 @@ import numpy as np
 
 def clean_stock_data(input_csv, output_csv=None, max_interpolation=10):
     """
-    Performs universal cleaning on stock data: standardizes daily entries, interpolates missing data, 
-    transforms NaN to zero, and saves the cleaned data to a CSV.
-    
-    Arguments:
-    input_csv -- Path to the raw CSV file containing stock prices and dividends
-    output_csv -- Path where the cleaned stock data CSV will be saved
+    Cleans stock data, interpolates missing data, and saves the cleaned data to a CSV.
     """
     stock_data = pd.read_csv(input_csv, parse_dates=['Date'])
-    
     stock_data['Date'] = pd.to_datetime(stock_data['Date'])
     stock_data.set_index('Date', inplace=True)
     
+    # Fill in missing dates and interpolate missing values
     full_date_range = pd.date_range(start=stock_data.index.min(), end=stock_data.index.max(), freq='D')
-    
     stock_data = stock_data.reindex(full_date_range)
-    
-
     stock_data = stock_data.interpolate(method='linear', limit=max_interpolation, limit_direction='forward')
-    
     stock_data.fillna(0, inplace=True)
 
     if output_csv:
@@ -31,118 +22,131 @@ def clean_stock_data(input_csv, output_csv=None, max_interpolation=10):
     return stock_data
 
 
+def clean_ipca(input_csv, output_csv):
+    """
+    Converts IPCA monthly data to daily variations and saves it to a CSV file.
+    """
+    ipca_data = pd.read_csv(input_csv)
+
+    # Ensure Date column is in datetime format
+    ipca_data['Date'] = pd.to_datetime(ipca_data['Date'])
+    ipca_data['ipca'] = pd.to_numeric(ipca_data['ipca'], errors='coerce')
+
+    daily_ipca_list = []
+    for idx, row in ipca_data.iterrows():
+        if not pd.isna(row['ipca']):
+            month_start = row['Date']
+            month_end = month_start + pd.DateOffset(months=1) - pd.DateOffset(days=1)
+            num_days_in_month = (month_end - month_start).days + 1
+            monthly_rate = row['ipca'] / 100
+            daily_rate = (1 + monthly_rate) ** (1 / num_days_in_month) - 1
+            daily_dates = pd.date_range(start=month_start, end=month_end, freq='D')
+            daily_series = pd.Series([daily_rate] * len(daily_dates), index=daily_dates)
+            daily_ipca_list.append(daily_series)
+
+    daily_ipca_df = pd.concat(daily_ipca_list).reset_index().rename(columns={'index': 'Date', 0: 'ipca'})
+    daily_ipca_df.to_csv(output_csv, index=False)
+    print(f"Saved cleaned IPCA data to {output_csv}")
+    return daily_ipca_df
 
 
-def build_total_variation(input_csv, output_csv):
+def build_variation(input_csv, output_csv):
     """
     Builds total return variation using cleaned stock data. Only processes '_close' and '_dividends' columns.
-    
-    Arguments:
-    input_csv -- Path to the raw CSV file containing stock prices and dividends
-    output_csv -- Path where the processed total return variation CSV will be saved
     """
     stocks = clean_stock_data(input_csv)
-    
     total_return_data = {}
 
     for column in stocks.columns:
         if "_close" in column:
             stock_name = column.replace("_close", "")
             dividend_column = f"{stock_name}_dividends"
-            
-            close_price = stocks[column]
-            dividends = stocks[dividend_column] if dividend_column in stocks.columns else pd.Series(0, index=stocks.index)
-            
-            # if close_price is zero, we set 0 to the total variation
-            valid_mask = close_price != 0
-            total_return_variation = pd.Series(0, index=stocks.index, dtype='float64')
+            close_price = stocks[column].to_numpy()
+            dividends = stocks[dividend_column].to_numpy() if dividend_column in stocks.columns else np.zeros(len(stocks))
+            total_return_variation = np.zeros(len(close_price))
 
-            total_return_variation[valid_mask] = (
-                ( (close_price.shift(-1) + dividends.shift(-1)) - close_price ) / close_price
-                )[valid_mask] # ( (P_t+1 + D_t+1) - P_t) / P_t
+            valid_mask = (close_price[:-1] != 0) & (close_price[1:] != 0)
+            total_return_variation[:-1][valid_mask] = (
+                ((close_price[1:][valid_mask] + dividends[1:][valid_mask]) - close_price[:-1][valid_mask])
+                / close_price[:-1][valid_mask]
+            )
 
-            total_return_variation = total_return_variation.fillna(0)
+            zero_to_nonzero_mask = (close_price[:-1] == 0) & (close_price[1:] != 0)
+            nonzero_to_zero_mask = (close_price[:-1] != 0) & (close_price[1:] == 0)
+            total_return_variation[:-1][zero_to_nonzero_mask] = 0
+            total_return_variation[:-1][nonzero_to_zero_mask] = 0
+
             total_return_data[stock_name] = total_return_variation
 
     total_return_df = pd.DataFrame(total_return_data, index=stocks.index)
     total_return_df.index.name = 'Date'
-
     total_return_df.reset_index(inplace=True)
-
     total_return_df.to_csv(output_csv, index=False)
     print(f"Saved total return variation to {output_csv}")
 
 
-
-def add_selic_to_total_return(total_return_csv, selic_csv):
+def add_selic(total_return_csv, selic_csv, output_csv):
+    """
+    Adds SELIC variation to total return data without IPCA adjustments.
+    """
     total_return_df = pd.read_csv(total_return_csv, parse_dates=['Date'])
     selic_df = pd.read_csv(selic_csv, parse_dates=['Date'])
     
     selic_df['selic'] = selic_df['selic'].interpolate(method='linear')
+    selic_df['selic'] = (1 + selic_df['selic']) ** (1 / 365) - 1  # Convert to daily rate
     selic_df.set_index('Date', inplace=True)
-
-    selic_df['selic'] = selic_df['selic'] / 365
-    
-    min_date = total_return_df['Date'].min()
-    max_date = total_return_df['Date'].max()
-    
-    selic_df = selic_df.loc[(selic_df.index >= min_date) & (selic_df.index <= max_date)]
     
     total_return_df.set_index('Date', inplace=True)
     total_return_df = selic_df[['selic']].join(total_return_df, how='right')
-    
     total_return_df.reset_index(inplace=True)
-    total_return_df.to_csv(total_return_csv, index=False)
-    print(f"Saved total return variation with SELIC to {total_return_csv}")
+    total_return_df.to_csv(output_csv, index=False)
+    print(f"Saved total return variation with SELIC to {output_csv}")
 
 
-def process_ipca_to_daily_variation(input_csv, output_csv):
+def compute_real_value(variation_csv, ipca_csv, output_csv):
     """
-    Converts IPCA monthly data to daily variations and saves it to a CSV file.
-    
-    Arguments:
-    input_csv -- Path to the raw CSV file containing IPCA monthly data
-    output_csv -- Path where the processed daily variation CSV will be saved
+    Computes real value by adjusting stock/SELIC variation data for inflation using IPCA.
     """
-    ipca_data = pd.read_csv(input_csv)
-
-    # Ensure Date column is in datetime format and IPCA column is numeric
-    ipca_data['Date'] = pd.to_datetime(ipca_data['Date'])
-    ipca_data['ipca'] = pd.to_numeric(ipca_data['ipca'], errors='coerce')
-
-    daily_ipca_list = []
-
-    for idx, row in ipca_data.iterrows():
-        if not pd.isna(row['ipca']):
-            month_start = row['Date']
-            month_end = month_start + pd.DateOffset(months=1) - pd.DateOffset(days=1)
-            num_days_in_month = (month_end - month_start).days + 1
-
-            monthly_rate = row['ipca'] / 100
-            daily_rate = (1 + monthly_rate) ** (1 / num_days_in_month) - 1
-
-            daily_dates = pd.date_range(start=month_start, end=month_end, freq='D')
-            daily_series = pd.Series([daily_rate] * len(daily_dates), index=daily_dates)
-
-            daily_ipca_list.append(daily_series)
-
-    daily_ipca_df = pd.concat(daily_ipca_list).reset_index().rename(columns={'index': 'Date', 0: 'IPCA_Daily_Variation'})
+    variation_df = pd.read_csv(variation_csv, parse_dates=['Date'])
+    ipca_df = pd.read_csv(ipca_csv, parse_dates=['Date'])
     
-    daily_ipca_df.to_csv(output_csv, index=False)
-    print(f"Saved IPCA daily variation to {output_csv}")
+    variation_df.set_index('Date', inplace=True)
+    ipca_df.set_index('Date', inplace=True)
+    
+    combined_df = variation_df.join(ipca_df, how='left')
+    
+    # Compute real value for each variation column by adjusting for IPCA
+    for column in variation_df.columns:
+        combined_df[f'{column}_real'] = (1 + combined_df[column]) / (1 + combined_df['ipca']) - 1
+    
+    combined_df.reset_index(inplace=True)
+    combined_df.drop(columns=['ipca'], inplace=True)
+    
+    combined_df.to_csv(output_csv, index=False)
+    print(f"Saved real value data to {output_csv}")
+
 
 if __name__ == "__main__":
     stock_input_csv = 'data/00_raw/stocks.csv'
-    index_input_csv = 'data/00_raw/indexes.csv'
+    selic_input_csv = 'data/00_raw/indexes.csv'
+    ipca_input_csv = 'data/00_raw/indexes.csv'
 
-    var_output_csv = 'data/01_clean/total_return_var.csv'
-    stocks_output_csv = 'data/01_clean/stocks.csv'
-    ipca_output_csv = 'data/01_clean/ipca.csv'
-
-
-    clean_stock_data(stock_input_csv, stocks_output_csv)
-    build_total_variation(stock_input_csv, var_output_csv)
+    cleaned_stocks_csv = 'data/01_clean/stocks.csv'
+    cleaned_ipca_csv = 'data/01_clean/ipca.csv'
+    variation_csv = 'data/01_clean/total_return_var.csv'
 
 
-    process_ipca_to_daily_variation(index_input_csv, ipca_output_csv)
-    add_selic_to_total_return(var_output_csv, index_input_csv)
+    # Step 1: Clean stock data
+    clean_stock_data(stock_input_csv, cleaned_stocks_csv)
+
+    # Step 2: Clean IPCA data
+    clean_ipca(ipca_input_csv, cleaned_ipca_csv)
+
+    # Step 3: Build total var without IPCA
+    build_variation(stock_input_csv, variation_csv)
+
+    # Step 4: Add SELIC without IPCA
+    add_selic(variation_csv, selic_input_csv, variation_csv)
+
+    # Step 5: Compute real value
+    compute_real_value(variation_csv, cleaned_ipca_csv, variation_csv)
