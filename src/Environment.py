@@ -3,9 +3,10 @@ import pandas as pd
 import torch
 
 class PortfolioEnv:
-    def __init__(self, stock_data_csv, ipca_csv, window_size, n_stocks=-1, stock1_baseline=False, allstocks_baseline=False):
+    def __init__(self, stock_data_csv, ipca_csv, window_size, n_stocks=-1, baseline_flag=False):
         stock_data = pd.read_csv(stock_data_csv, parse_dates=['Date'])
         stock_data.set_index('Date', inplace=True)
+
         if n_stocks == -1:
             self.stock_data = stock_data
         else:
@@ -15,13 +16,11 @@ class PortfolioEnv:
         self.ipca_data = pd.read_csv(ipca_csv, parse_dates=['Date'])
         self.ipca_data.set_index('Date', inplace=True)
 
-        self.stock1_baseline = stock1_baseline
-        self.allstocks_baseline = allstocks_baseline
+        self.baseline_flag = baseline_flag
 
         self.window_size = window_size
         self.cumulative_wallet_value = 1  # Starts with 100% initial investment
-        self.cumulative_baseline_stock1 = 1
-        self.cumulative_baseline_allstocks = 1
+        self.cumulative_baseline = 1
         self.reset()
 
     def reset(self):
@@ -30,8 +29,7 @@ class PortfolioEnv:
         self.portfolio_allocation[0] = 1.  # All initial investment in the first asset
         
         self.cumulative_wallet_value = 1.
-        self.cumulative_baseline_stock1 = 1.
-        self.cumulative_baseline_allstocks = 1.
+        self.cumulative_baseline = 1.
 
         self.initial_prices = torch.tensor(self.stock_data.iloc[self.current_step].values, dtype=torch.float32)
         self.portfolio_value = 1
@@ -49,11 +47,16 @@ class PortfolioEnv:
         return real_portifolio_var
 
     def compute_portifolio_reward(self, portifolio_value, allocation):
+        diversification_penalty = torch.sum(allocation ** 2)
+        
+        lambda_penalty=0.01
+        
+        reward = portifolio_value = lambda_penalty * diversification_penalty
         reward = portifolio_value
         return reward
         
 
-    def step(self, action, stock1_baseline=False, allstocks_baseline=False):
+    def step(self, action):
         assert torch.isclose(torch.sum(action), torch.tensor(1.), atol=1e-4), f"Action must sum to 1, but got {np.sum(action)}"
 
         if self.current_step + 1 >= len(self.stock_data)-self.window_size:
@@ -68,19 +71,14 @@ class PortfolioEnv:
 
         # reward = real_portfolio_var
         reward = self.compute_portifolio_reward(real_portfolio_var, action)
-        
-        if self.stock1_baseline:
-            baseline_action1 = torch.zeros_like(action)
-            baseline_action1[0] = 1.0
-            real_portfolio_var1 = self.compute_portifolio_var(baseline_action1, next_changes, inflation_rate)
-            self.cumulative_baseline_stock1 *= (1 + real_portfolio_var1)
+        reward = reward.item()
 
-        if self.allstocks_baseline:
+
+        if self.baseline_flag:
             n_assets = len(action)
-            baseline_action2 = torch.full_like(action, 1.0 / n_assets)
-            real_portfolio_var2 = self.compute_portifolio_var(baseline_action2, next_changes, inflation_rate)
-            self.cumulative_baseline_allstocks *= (1 + real_portfolio_var2)
-
+            baseline_action = torch.full_like(action, 1.0 / n_assets)
+            real_portfolio_var = self.compute_portifolio_var(baseline_action, next_changes, inflation_rate)
+            self.cumulative_baseline *= (1 + real_portfolio_var)
 
         self.current_step += 1
         done = self.current_step >= len(self.stock_data) - self.window_size - 1
@@ -88,8 +86,8 @@ class PortfolioEnv:
 
         return self._get_state(), reward, done
 
-    def get_baseline_cumulative_values(self):
-        return self.cumulative_baseline_stock1, self.cumulative_baseline_allstocks
+    def get_baseline_cumulative_value(self):
+        return self.cumulative_baseline
 
     def get_cumulative_value(self):
         return float(self.cumulative_wallet_value)

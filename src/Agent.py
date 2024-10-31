@@ -1,95 +1,65 @@
 
-import random
 import torch
 import torch.nn as nn
-
-from .ReplayBuffer import ReplayBuffer
+import torch.optim as optim
 
 class Agent:
-    def __init__(self, actor, critic, gamma=0.99, buffer_size=10000, batch_size=64):
-        self.actor = actor
-        self.critic = critic
+    def __init__(self, actor, critic, gamma=0.99, n_steps=5, actor_lr=0.001, critic_lr=0.001, std_noise=0, device="cpu"):
+        self.actor = actor.to(device)
+        self.critic = critic.to(device)
         self.gamma = gamma
+        self.n_steps = n_steps
+        self.std_noise = std_noise
+        self.device = device
 
-        self.replay_buffer = ReplayBuffer(buffer_size, batch_size)
-        self.batch_size = batch_size
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr)
 
-        self.starting_exploration=0.6
-        self.episode_length=30
-        self.n_exploratory_stocks=2
-        self.current_step=0
+        self.trajectory = Trajectory(gamma, self.n_steps, device)
 
-
-    def select_action(self, state, current_step=0):
-        self.current_step = current_step
-        on_policy_action = self.policy(state)
-        off_policy_action = self.apply_exploratory_behavior(on_policy_action)
-        return off_policy_action
-    
 
     def policy(self, state):
-        action = self.actor.predict(state)
-        assert torch.isclose(torch.sum(action), torch.tensor(1.0), atol=1e-4), f"Action must sum to 1, but got {torch.sum(action)}"
+        action = self.actor(state)
+        action = action.clone()
+        if self.std_noise > 0:
+            noise = torch.normal(mean=0, std=self.std_noise, size=action.size(), device=self.device)
+            action = action + noise
+            action = torch.clamp(action, min=0)
+        action = action / action.sum(dim=-1, keepdim=True)
         return action
-
     
-    def predict_value(self, state, action):
-        if state.dim() == 1:
-            state = state.unsqueeze(0)  # Shape: [1, state_size]
-        # Ensure action is a 2D tensor
-        if action.dim() == 1:
-            action = action.unsqueeze(0)  # Shape: [1, action_size]
-        q_value = self.critic.forward(state, action)
-        return q_value.item()
+    def store_transition(self, state, action, next_state, reward, done):
+        state = state.to(self.device)
+        action = action.detach().to(self.device)
+        next_state = next_state.to(self.device)
+        reward = torch.tensor([reward], dtype=torch.float32, device=self.device)
+        done = torch.tensor([done], dtype=torch.bool, device=self.device)
 
-    def store_transition(self, state, action, reward, next_state, done):
-        state = state.detach()
-        action = action.detach()
-        next_state = next_state.detach()
-        self.replay_buffer.add(state, action, reward, next_state, done)
+        self.trajectory.add(state, action, next_state, reward, done)
 
+    def train(self):
+        if self.trajectory.is_ready():
+            G = self.trajectory.compute_n_step_return(self.actor, self.critic)
+            state, action, next_state, done = self.trajectory.get()
 
+            state = state.to(self.device)
+            action = action.to(self.device)
+            next_state = next_state.to(self.device)
 
-    def apply_exploratory_behavior(self, action):
+            self.critic_optimizer.zero_grad()
+            value = self.critic(state, action)
+            loss_critic = nn.functional.mse_loss(value, G)
+            loss_critic.backward()
+            self.critic_optimizer.step()
 
-        exploration_rate = self.starting_exploration * (1 - self.current_step / self.episode_length)
-        exploration_rate = max(0.0, exploration_rate)
+            self.actor_optimizer.zero_grad()
+            action = self.actor(state)
+            actor_loss = -self.critic(state, action).mean()
+            actor_loss.backward()
+            self.actor_optimizer.step()
 
-        n_stocks = action.size(0)
-        exploratory_stocks = random.sample(range(n_stocks), self.n_exploratory_stocks)
-
-        exploratory_action = torch.zeros_like(action)
-        exploratory_allocation = exploration_rate / self.n_exploratory_stocks
-
-        remaining_allocation = action.clone()
-        for stock_idx in exploratory_stocks:
-            exploratory_action[stock_idx] = exploratory_allocation
-            remaining_allocation[stock_idx] = 0
-
-        if remaining_allocation.sum() > 0:
-            remaining_allocation = remaining_allocation * (1 - exploration_rate) / remaining_allocation.sum()
-
-        final_action = exploratory_action + remaining_allocation
-
-        final_action = final_action / final_action.sum()
-        return final_action
-
-
-
-    def train(self, actor_optimizer, critic_optimizer):
-        if self.replay_buffer.size() < self.batch_size:
-            return
-        
-        states, actions, rewards, next_states, dones = self.replay_buffer.sample()
-
-        with torch.no_grad():
-            next_actions = self.actor.forward(next_states)
-            next_q_values = self.critic.forward(next_states, next_actions).squeeze(1)
-            target_q_values = rewards + self.gamma * (1 - dones) * next_q_values
-
-        self.critic.update(states, actions, target_q_values, critic_optimizer)
-
-        self.actor.update(states, self.critic, actor_optimizer)
+    def reset(self):
+        self.trajectory.reset()
 
 
     def save(self, actor_filename, critic_filename):
@@ -97,87 +67,112 @@ class Agent:
         torch.save(self.critic.state_dict(), critic_filename)
 
     def load(self, actor_filename, critic_filename):
-        self.actor.load_state_dict(torch.load(actor_filename))
-        self.critic.load_state_dict(torch.load(critic_filename))
+        self.actor.load_state_dict(torch.load(actor_filename, map_location=self.device))
+        self.critic.load_state_dict(torch.load(critic_filename, map_location=self.device))
 
 
 class NNActor(nn.Module):
-    def __init__(self, state_size, action_size, hidden_layers=[128, 64, 32], random_state=123,
-                 add_noise=False, noise_scale=0.01, entropy_beta=0.01):
+    def __init__(self, state_size, action_size, hidden_layers=[128, 64, 32], random_state=123, device="cpu"):
         torch.manual_seed(random_state)
         super(NNActor, self).__init__()
         layers = []
         input_size = state_size
         for hidden_size in hidden_layers:
             layers.append(nn.Linear(input_size, hidden_size))
-            layers.append(nn.ELU())
+            layers.append(nn.ReLU())
             input_size = hidden_size
 
         layers.append(nn.Linear(input_size, action_size))
         self.model = nn.Sequential(*layers)
-        self.add_noise = add_noise
-        self.noise_scale = noise_scale
-        self.entropy_beta = entropy_beta
         self.action_size = action_size
+        self.device = device
+        self.to(device)
 
     def forward(self, state):
+        state = state.to(self.device)
+        if state.dim() == 1:
+            state = state.unsqueeze(0)
         logits = self.model(state)
-        if self.add_noise:
-            noise = torch.randn_like(logits) * self.noise_scale
-            logits += noise
         return torch.softmax(logits, dim=-1)
 
-    def predict(self, state):
-        action = self.forward(state.unsqueeze(0))
-        return action.squeeze(0)
-    
-    def update(self, state, critic, optimizer):
-        action = self.forward(state)
-        with torch.no_grad():
-            q_value = critic.forward(state, action).squeeze(1)
-        entropy_loss = -torch.sum(action * torch.log(action + 1e-6))
-        policy_loss = -q_value.mean() - self.entropy_beta * entropy_loss
-        optimizer.zero_grad()
-        policy_loss.backward()
-        optimizer.step()
 
 
-class QCritic(nn.Module):
-    def __init__(self, state_size, action_size, hidden_layers=[128, 64, 32], random_state=123):
+class Critic(nn.Module):
+    def __init__(self, state_size, action_size, hidden_layers=[128, 64, 32], random_state=123, device="cpu"):
         torch.manual_seed(random_state)
-        super(QCritic, self).__init__()
-        input_size = state_size + action_size
+        super(Critic, self).__init__()
         layers = []
+        input_size = state_size + action_size
         for hidden_size in hidden_layers:
             layers.append(nn.Linear(input_size, hidden_size))
-            layers.append(nn.ELU())
+            layers.append(nn.ReLU())
             input_size = hidden_size
         layers.append(nn.Linear(input_size, 1))
         self.model = nn.Sequential(*layers)
+        self.device = device
+        self.to(self.device)
 
     def forward(self, state, action):
+        state = state.to(self.device)
+        action = action.to(self.device)
         if state.dim() == 1:
             state = state.unsqueeze(0)
         if action.dim() == 1:
             action = action.unsqueeze(0)
+        x = torch.cat([state, action], dim=1)
+        value = self.model(x)
+        return value.squeeze(-1)
 
-        state_action = torch.cat([state, action], dim=1)
-        return self.model(state_action)
+class Trajectory:
+    def __init__(self, gamma, n_steps, device="cpu"):
+        self.gamma = gamma
+        self.n_steps = n_steps
+        self.device = device
 
-    def predict(self, state, action):
-        if state.dim() == 1:
-            state = state.unsqueeze(0)
-        if action.dim() == 1:
-            action = action.unsqueeze(0)
-        q_value = self.forward(state, action)
-        return q_value.item()
+        self.states = []
+        self.actions = []
+        self.next_states = []
+        self.rewards = []
+        self.dones = []
 
-    def update(self, state, action, target_q_value, optimizer):
+    def add(self, state, action, next_state, reward, done):
+        self.states.append(state.to(self.device))
+        self.actions.append(action.to(self.device))
+        self.next_states.append(next_state.to(self.device))
+        self.rewards.append(reward.to(dtype=torch.float32, device=self.device))
+        self.dones.append(done.to(dtype=torch.bool, device=self.device))
 
-        target_q_value = target_q_value.unsqueeze(1)
-        
-        predicted_q_value = self.forward(state, action)
-        loss = nn.MSELoss()(predicted_q_value, target_q_value)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+    def is_ready(self):
+        return len(self.rewards) >= self.n_steps
+    
+    def compute_n_step_return(self, actor, critic):
+        n = len(self.rewards)
+        with torch.no_grad():
+            if not self.dones[-1]:
+                next_state = self.next_states[-1]
+                if next_state.dim() == 1:
+                    next_state = next_state.unsqueeze(0)
+                next_action = actor(next_state)
+                V_next = critic(next_state, next_action)
+            else:
+                V_next = torch.tensor([0.0], device=self.device)
+
+        G = V_next * (self.gamma ** n)
+        for i in reversed(range(n)):
+            reward = self.rewards[i]
+            G = reward + self.gamma * G
+        return G
+    
+    def get(self):
+        state = self.states.pop(0)
+        action = self.actions.pop(0)
+        next_state = self.next_states.pop(0)
+        done = self.dones.pop(0)
+        return state, action, next_state, done
+    
+    def reset(self):
+        self.states = []
+        self.actions = []
+        self.rewards = []
+        self.dones = []
+        self.next_states = []
