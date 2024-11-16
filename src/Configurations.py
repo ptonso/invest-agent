@@ -6,9 +6,7 @@ class Configurations:
     def __init__(self, seed=123, device="cpu",
                 stock_csv = "data/01_clean/total_return_var.csv",
                 ipca_csv = "data/01_clean/ipca.csv",
-                action_csv = "data/model/agent_actions.csv",
-                start_date = "2005-01-03",
-                save_actions = True,
+                action_csv = False,
                 n_stocks = -1,    # -1
                 window_size = 30, # 30
                 n_steps = 5,
@@ -28,9 +26,6 @@ class Configurations:
         self.stock_csv = stock_csv
         self.ipca_csv = ipca_csv
         self.action_csv = action_csv
-        self.start_date = start_date
-
-        self.save_actions = save_actions
 
         self.n_stocks = n_stocks
         self.window_size = window_size
@@ -53,9 +48,9 @@ class Configurations:
 
     def save_config(self, experiment, filepath):
         self.get_experiment_results(experiment)
-        os.makedirs(os.basename(filepath), exists_ok=True)
+        os.makedirs(os.path.basename(filepath), exist_ok=True)
 
         json_data = {attr:value for attr, value in self.__dict__.items()}
 
         with open(filepath, 'w') as f:
-            json.dump(json_data, f)
+            json.dump(json_data, f, indent=4)

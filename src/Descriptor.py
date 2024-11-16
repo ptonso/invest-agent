@@ -6,9 +6,8 @@ from datetime import datetime, timedelta
 import matplotlib.dates as mdates
 
 class Descriptor:
-    def __init__(self, n_stocks, start_date, baseline_flag=False):
+    def __init__(self, n_stocks, baseline_flag=False):
         self.baseline_flag = baseline_flag
-        self.start_date = datetime.strptime(start_date, '%Y-%m-%d')
 
         self.allocations = []
         self.cumulative_values = []
@@ -31,8 +30,6 @@ class Descriptor:
         self.ax2.set_title('Portfolio Allocation Over Time')
         self.ax2.set_ylabel('Stocks')
         self.ax2.set_xlabel('Time Steps')
-        self.ax2.set_yticks(range(self.n_stocks))
-        self.ax2.set_yticklabels([f'Stock {i}' for i in range(self.n_stocks)])
 
         if self.baseline_flag:
             self.cumulative_values_baseline = []
@@ -65,10 +62,15 @@ class Descriptor:
 
         self.ax1.xaxis.set_major_locator(mdates.YearLocator())
         self.ax1.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
-        plt.setp(self.ax1.get_xticklabels(), rotation=45, ha='right')
+        plt.setp(self.ax1.get_xticklabels(), rotation=45, ha='right', fontsize=8)
 
         allocations_array = np.array(self.allocations).T  # Shape: (n_stocks, n_time_steps)
         date_nums = mdates.date2num(self.dates)
+
+        if len(date_nums) > 1:
+            extent = [date_nums[0], date_nums[-1], 0, allocations_array.shape[0]]
+        else:
+            extent = [date_nums[0] - 1, date_nums[0] + 1, 0, allocations_array.shape[0]]
 
         if self.im is None:
             self.im = self.ax2.imshow(
@@ -76,7 +78,7 @@ class Descriptor:
                 aspect='auto',
                 cmap='viridis',
                 interpolation='none',
-                extent=[date_nums[0], date_nums[-1], 0, allocations_array.shape[0]]
+                extent=extent
             )
             self.fig.colorbar(self.im, ax=self.ax2, label='Allocation Percentage')
         else:
@@ -86,13 +88,19 @@ class Descriptor:
         self.ax2.set_title('Portfolio Allocation Over Time')
         self.ax2.set_ylabel('Stocks')
         self.ax2.set_xlabel('Date')
-        self.ax2.set_yticks(range(self.n_stocks))
-        self.ax2.set_yticklabels([f'Stock {i}' for i in range(self.n_stocks)])
+
+        if self.n_stocks > 20:
+            sampled_indices = np.linspace(0, self.n_stocks - 1, 20, dtype=int)
+        else:
+            sampled_indices = range(self.n_stocks)
+
+        self.ax2.set_yticks(sampled_indices)
+        self.ax2.set_yticklabels([f'Stock {i}' for i in sampled_indices], fontsize=10)
 
         self.ax2.xaxis_date()
         self.ax2.xaxis.set_major_locator(mdates.YearLocator())
         self.ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
-        plt.setp(self.ax2.get_xticklabels(), rotation=45, ha='right')
+        plt.setp(self.ax2.get_xticklabels(), rotation=45, ha='right', fontsize=8)
 
         plt.draw()
         plt.pause(0.001)

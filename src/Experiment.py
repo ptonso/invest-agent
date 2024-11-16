@@ -1,5 +1,3 @@
-
-
 import os
 import pandas as pd
 
@@ -39,8 +37,7 @@ class Experiment:
         )
 
         if config.describe_flag:
-            self.descriptor = Descriptor(n_stocks=stock_size, 
-                                         start_date=config.start_date,
+            self.descriptor = Descriptor(n_stocks=stock_size,
                                          baseline_flag=config.baseline_flag)
             self.current_step = 0
 
@@ -75,7 +72,7 @@ class Experiment:
                                        current_date=current_date,
                                        baseline_value=baseline_value)
             
-            if self.config.save_actions:
+            if self.config.action_csv:
                 self.save_action_to_csv(action, window_date)
             
             current_step += 1
@@ -85,7 +82,7 @@ class Experiment:
                 break
 
         if self.config.savefig:
-            self.descriptor.save_plot(self.config.savefig)
+            self.descriptor.save_fig(self.config.savefig)
 
         print(self.env.get_cumulative_value())
 

@@ -41,17 +41,18 @@ class PortfolioEnv:
         state = torch.tensor(stock_window.flatten(), dtype=torch.float32)
         return state
 
-    def compute_portifolio_var(self, action, next_changes, inflation_rate):
+    def compute_portifolio_var(self, action, next_changes, inflation_rate=None):
         portifolio_var = torch.dot(action, next_changes)
-        real_portifolio_var = (1 + portifolio_var) / (1 + inflation_rate) - 1
-        return real_portifolio_var
+        if inflation_rate:
+            portifolio_var = (1 + portifolio_var) / (1 + inflation_rate) - 1
+        return portifolio_var
 
     def compute_portifolio_reward(self, portifolio_value, allocation):
         diversification_penalty = torch.sum(allocation ** 2)
         
         lambda_penalty=0.01
         
-        reward = portifolio_value = lambda_penalty * diversification_penalty
+        reward = portifolio_value - lambda_penalty * diversification_penalty
         reward = portifolio_value
         return reward
         
@@ -66,7 +67,7 @@ class PortfolioEnv:
         next_changes = torch.tensor(self.stock_data.iloc[self.current_step + 1].values, dtype=torch.float32)
         inflation_rate = torch.tensor(self.ipca_data.iloc[self.current_step + 1].values[0], dtype=torch.float32)
     
-        real_portfolio_var = self.compute_portifolio_var(action, next_changes, inflation_rate)
+        real_portfolio_var = self.compute_portifolio_var(action, next_changes) # , inflation_rate)
         self.cumulative_wallet_value *= (1 + real_portfolio_var)
 
         # reward = real_portfolio_var
