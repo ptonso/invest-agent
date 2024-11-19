@@ -2,7 +2,6 @@ import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import numpy as np
-from datetime import datetime, timedelta
 import matplotlib.dates as mdates
 
 class Descriptor:
