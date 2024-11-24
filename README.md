@@ -1,14 +1,14 @@
 # Reinforcement learning for Brazilian Stock Trading
 
-run `download_data.py` to fill the datasets with stock market value, Selic and IPCA.
+run `src/download_data.py` to fill the datasets with stock market value, Selic and IPCA.
 
-run `clean_data.py` to produce the cleaned variational data for agent interaction:
+run `src/clean_data.py` to produce the cleaned variational data for agent interaction:
 
-`stocks_descriptive.ipynb` explore the collected data and helps understand and debug the system
+`descriptive&regression.ipynb` explore the collected data and helps understand and debug the system
 
 ![](results/time-series.png)
 
-`regression.ipynb` defines linear regression models to the stock data, helping understand if it's possible to predict stock time-series with past data.
+`descriptive&regression.ipynb` also defines linear regression models to the stock data, helping understand if it's possible to predict stock time-series with past data.
 
 ![](results/regression.png)
 

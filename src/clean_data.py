@@ -114,14 +114,11 @@ def compute_real_value(variation_csv, ipca_csv, output_csv):
     ipca_df.set_index('Date', inplace=True)
     
     combined_df = variation_df.join(ipca_df, how='left')
-    
-    # Compute real value for each variation column by adjusting for IPCA
-    for column in variation_df.columns:
-        combined_df[f'{column}_real'] = (1 + combined_df[column]) / (1 + combined_df['ipca']) - 1
-    
+        
     combined_df.reset_index(inplace=True)
     combined_df.drop(columns=['ipca'], inplace=True)
     
+    combined_df.index.name = 'Date'
     combined_df.to_csv(output_csv, index=False)
     print(f"Saved real value data to {output_csv}")
 
