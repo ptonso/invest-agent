@@ -1,4 +1,0 @@
-2024-11-24 18:12:55,597 - $CIEL3.SA: possibly delisted; no price data found  (1d 2005-01-01 00:00:00 -> 2024-11-24) (Yahoo error = "No data found, symbol may be delisted")
-2024-11-24 18:12:57,441 - $CIEL3.SA: possibly delisted; no price data found  (1d 1925-12-19 -> 2024-11-24) (Yahoo error = "No data found, symbol may be delisted")
-2024-11-24 18:13:23,393 - Saved data to: data/00_raw/stocks.csv
-2024-11-24 18:13:23,393 - Failed to retrieve data for the following tickers: CIEL3.SA.
